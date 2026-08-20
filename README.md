@@ -11,20 +11,39 @@ A C++17 thread-safe bounded SPSC queue library for messaging between exactly one
 
 ## Assumptions & Known Limitations
 
-1. **Single Producer, Single Consumer**:
-   - The queue is designed exclusively for access by **exactly one producer thread** (invoking push operations) and **exactly one consumer thread** (invoking pop operations) concurrently.
-   - Using multiple producer threads or multiple consumer threads without external synchronization will result in data races and undefined behavior.
-2. **Fixed Bounded Capacity**:
-   - Queue capacity is determined at construction time and remains fixed for the lifetime of the object.
+1. **Single Producer, Single Consumer Only**:
+   The queue is designed for exactly one producer thread (calling `try_push` / `emplace`)
+   and exactly one consumer thread (calling `try_pop`) operating concurrently.  
+   Using multiple producers or multiple consumers without external synchronization
+   results in undefined behavior.
+
+2. **Fixed Bounded Capacity (Power of Two)**:
+   Capacity is set at construction time and rounded up to the next power of two
+   to enable fast bitwise index wrapping (`index & mask`) instead of modulo division.
+   For example, requesting capacity 10 allocates 16 slots.
+
+3. **Lock-Free, Not Wait-Free**:
+   `try_push` and `try_pop` are non-blocking (they return `false` immediately if
+   the queue is full/empty). Callers that need blocking semantics must spin or
+   implement their own back-off strategy.
+
+4. **Move-Only Type Support**:
+   The queue stores elements in uninitialized memory (placement `new` /
+   `std::destroy_at`), so types without default constructors (e.g.
+   `std::unique_ptr`) work correctly. `T` must be move-constructible and
+   move-assignable.
+
+5. **Observation Functions Are Approximate**:
+   `empty()`, `full()`, and `size()` return a snapshot that may be stale under
+   concurrent access. They are exact only when the queue is quiescent.
 
 ## How to Build
 
 Configure and build the project using CMake:
 
 ```bash
-mkdir -p build && cd build
-cmake ..
-cmake --build .
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
 ## How to Run Tests
@@ -34,11 +53,10 @@ After building the project, tests can be run using `ctest` or by executing test 
 Using `ctest`:
 
 ```bash
-cd build
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
-Or executing the test binaries directly:
+Or run test binaries directly:
 
 ```bash
 ./tests/spsc_queue_test
